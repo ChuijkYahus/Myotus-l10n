@@ -143,6 +143,8 @@ public final class MyoExperienceGameTests {
         assertEquals(helper, MyotusAPI.experience().totalForLevel(30), apothicCost,
                 "Apothic anvil cost should be the raw XP value of the displayed level cost");
         assertTrue(helper, vanillaCost > apothicCost, "High-level vanilla anvil cost should exceed Apothic cost");
+        assertEquals(helper, 109L, MyotusAPI.experience().vanillaAnvilCost(30, 1, 0.5F),
+                "Vanilla anvil cost should preserve the player's progress fraction");
         helper.succeed();
     }
 

@@ -161,6 +161,13 @@ class ExperienceMathTest {
         assertThrows(IllegalArgumentException.class, () -> ExperienceMath.levelForTotalExperience(-1));
         assertThrows(IllegalArgumentException.class, () -> ExperienceMath.vanillaAnvilExperienceCost(-1, 0));
         assertThrows(IllegalArgumentException.class, () -> ExperienceMath.vanillaAnvilExperienceCost(0, -1));
+        assertThrows(IllegalArgumentException.class, () -> ExperienceMath.vanillaAnvilExperienceCost(0, 1));
+        assertThrows(IllegalArgumentException.class,
+                () -> ExperienceMath.vanillaAnvilExperienceCost(30, 1, -0.01F));
+        assertThrows(IllegalArgumentException.class,
+                () -> ExperienceMath.vanillaAnvilExperienceCost(30, 1, 1.0F));
+        assertThrows(IllegalArgumentException.class,
+                () -> ExperienceMath.vanillaAnvilExperienceCost(30, 1, Float.NaN));
         assertThrows(IllegalArgumentException.class, () -> ExperienceMath.apothicAnvilExperienceCost(-1));
         assertThrows(IllegalArgumentException.class, () -> ExperienceMath.apothicEnchantingTableExperienceCost(-1, 0));
         assertThrows(IllegalArgumentException.class, () -> ExperienceMath.apothicEnchantingTableExperienceCost(0, -1));
@@ -172,8 +179,10 @@ class ExperienceMathTest {
     void handlesLargeExperienceInputsWithoutLinearScanningOrOverflow() {
         int level = ExperienceMath.levelForTotalExperience(Long.MAX_VALUE);
 
-        assertTrue(level > 1_000_000_000);
-        assertTrue(ExperienceMath.totalExperienceForLevel(level) <= Long.MAX_VALUE);
+        assertEquals(1_431_655_783, level);
+        assertEquals(9_223_372_031_843_981_383L, ExperienceMath.totalExperienceForLevel(level));
+        assertEquals(5_010_794_424L, ExperienceMath.experienceIntoLevel(Long.MAX_VALUE));
+        assertEquals(12_884_901_889L, ExperienceMath.experienceToNextLevel(level));
         assertThrows(ArithmeticException.class, () -> ExperienceMath.totalExperienceForLevel(level + 1));
         assertThrows(ArithmeticException.class, () -> ExperienceMath.totalExperienceForLevel(Integer.MAX_VALUE));
         assertThrows(ArithmeticException.class, () -> ExperienceMath.experienceToNextLevel(Integer.MAX_VALUE));
@@ -185,6 +194,9 @@ class ExperienceMathTest {
                 ExperienceMath.vanillaAnvilExperienceCost(100, 30));
         assertEquals(ExperienceMath.totalExperienceForLevel(30), ExperienceMath.apothicAnvilExperienceCost(30));
         assertTrue(ExperienceMath.vanillaAnvilExperienceCost(100, 30) > ExperienceMath.apothicAnvilExperienceCost(30));
+        assertEquals(107, ExperienceMath.vanillaAnvilExperienceCost(30, 1));
+        assertEquals(109, ExperienceMath.vanillaAnvilExperienceCost(30, 1, 0.5F));
+        assertEquals(0, ExperienceMath.vanillaAnvilExperienceCost(30, 0, 0.75F));
     }
 
     @Test

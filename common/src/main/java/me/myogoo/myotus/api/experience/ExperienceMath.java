@@ -284,9 +284,14 @@ public final class ExperienceMath {
             long linearTerm = Math.multiplyExact(81L, level);
             return Math.floorDiv(Math.addExact(Math.subtractExact(squaredTerm, linearTerm), 720L), 2L);
         }
-        long squaredTerm = Math.multiplyExact(Math.multiplyExact(9L, level), level);
-        long linearTerm = Math.multiplyExact(325L, level);
-        return Math.floorDiv(Math.addExact(Math.subtractExact(squaredTerm, linearTerm), 4440L), 2L);
+        long levelFactor = level;
+        long growthFactor = Math.subtractExact(Math.multiplyExact(9L, level), 325L);
+        if ((level & 1) == 0) {
+            levelFactor /= 2L;
+        } else {
+            growthFactor /= 2L;
+        }
+        return Math.addExact(Math.multiplyExact(levelFactor, growthFactor), 2220L);
     }
 
     /**
@@ -332,7 +337,13 @@ public final class ExperienceMath {
         if (level == Integer.MAX_VALUE) {
             throw new ArithmeticException("No representable level exists after Integer.MAX_VALUE");
         }
-        return totalExperienceForLevel(level + 1) - totalExperienceForLevel(level);
+        if (level >= 30) {
+            return Math.addExact(112L, Math.multiplyExact((long) level - 30L, 9L));
+        }
+        if (level >= 15) {
+            return Math.addExact(37L, Math.multiplyExact((long) level - 15L, 5L));
+        }
+        return Math.addExact(7L, Math.multiplyExact((long) level, 2L));
     }
 
     /**
@@ -341,15 +352,41 @@ public final class ExperienceMath {
      * <p>Vanilla anvils remove levels from the player's current level, so a cost of 30 is much
      * larger for a level-100 player than for a level-30 player.</p>
      *
+     * <p>This overload assumes the player's progress bar is empty. Use
+     * {@link #vanillaAnvilExperienceCost(int, int, float)} when the current progress must be preserved.</p>
+     *
      * @param currentLevel player's current vanilla experience level
      * @param levelCost displayed level cost
      * @return raw XP represented by removing {@code levelCost} levels from {@code currentLevel}
+     * @throws IllegalArgumentException if {@code levelCost} exceeds {@code currentLevel}
      */
     public static long vanillaAnvilExperienceCost(int currentLevel, int levelCost) {
+        return vanillaAnvilExperienceCost(currentLevel, levelCost, 0.0F);
+    }
+
+    /**
+     * Returns raw XP consumed when vanilla removes levels while retaining the player's progress fraction.
+     *
+     * @param currentLevel player's current vanilla experience level
+     * @param levelCost displayed level cost
+     * @param experienceProgress current progress in the range {@code [0, 1)}
+     * @return raw XP represented by the player's state change
+     * @throws IllegalArgumentException if the level cost is unaffordable or the progress is invalid
+     */
+    public static long vanillaAnvilExperienceCost(int currentLevel, int levelCost, float experienceProgress) {
         requireNonNegative(currentLevel, "currentLevel");
         requireNonNegative(levelCost, "levelCost");
-        int targetLevel = Math.max(0, currentLevel - levelCost);
-        return totalExperienceForLevel(currentLevel) - totalExperienceForLevel(targetLevel);
+        requireValidExperienceProgress(experienceProgress);
+        if (levelCost > currentLevel) {
+            throw new IllegalArgumentException("levelCost must not exceed currentLevel");
+        }
+
+        int targetLevel = currentLevel - levelCost;
+        long currentExperience = Math.addExact(totalExperienceForLevel(currentLevel),
+                experiencePointsAtProgress(currentLevel, experienceProgress));
+        long targetExperience = Math.addExact(totalExperienceForLevel(targetLevel),
+                experiencePointsAtProgress(targetLevel, experienceProgress));
+        return Math.subtractExact(currentExperience, targetExperience);
     }
 
     /**
@@ -410,6 +447,20 @@ public final class ExperienceMath {
             return totalExperienceForLevel(level) <= totalExperience;
         } catch (ArithmeticException ignored) {
             return false;
+        }
+    }
+
+    private static long experiencePointsAtProgress(int level, float experienceProgress) {
+        long needed = experienceToNextLevel(level);
+        long points = needed <= Integer.MAX_VALUE
+                ? Math.round(experienceProgress * (int) needed)
+                : Math.round((double) experienceProgress * needed);
+        return Math.min(points, needed - 1L);
+    }
+
+    private static void requireValidExperienceProgress(float experienceProgress) {
+        if (!Float.isFinite(experienceProgress) || experienceProgress < 0.0F || experienceProgress >= 1.0F) {
+            throw new IllegalArgumentException("experienceProgress must be finite and in [0, 1)");
         }
     }
 

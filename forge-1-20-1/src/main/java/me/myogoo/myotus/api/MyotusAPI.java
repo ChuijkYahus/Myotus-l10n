@@ -370,6 +370,15 @@ public final class MyotusAPI {
             return ExperienceMath.vanillaAnvilExperienceCost(currentLevel, levelCost);
         }
 
+        public long vanillaAnvilCost(int currentLevel, int levelCost, float experienceProgress) {
+            return ExperienceMath.vanillaAnvilExperienceCost(currentLevel, levelCost, experienceProgress);
+        }
+
+        public long vanillaAnvilCost(Player player, int levelCost) {
+            Objects.requireNonNull(player, "player");
+            return vanillaAnvilCost(player.experienceLevel, levelCost, player.experienceProgress);
+        }
+
         public long apothicAnvilCost(int levelCost) {
             return ExperienceMath.apothicAnvilExperienceCost(levelCost);
         }
