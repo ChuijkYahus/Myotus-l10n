@@ -103,6 +103,7 @@ jobs:
           version-type: ${{ steps.metadata.outputs.version_type }}
           changelog: ${{ steps.metadata.outputs.changelog }}
           loaders: ${{ env.MOD_LOADER }}
+          environment: client | server
           game-versions: ${{ env.MINECRAFT_VERSION }}
           java: ${{ env.JAVA_VERSION }}
           dependencies: |
