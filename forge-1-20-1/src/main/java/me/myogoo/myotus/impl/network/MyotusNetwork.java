@@ -9,6 +9,8 @@ import me.myogoo.myotus.api.network.MyoPacketHandler;
 import me.myogoo.myotus.util.MyoLogger;
 import net.minecraft.network.FriendlyByteBuf;
 import net.minecraft.server.level.ServerPlayer;
+import net.minecraftforge.api.distmarker.Dist;
+import net.minecraftforge.fml.loading.FMLEnvironment;
 import net.minecraftforge.network.NetworkDirection;
 import net.minecraftforge.network.NetworkRegistry;
 import net.minecraftforge.network.PacketDistributor;
@@ -71,7 +73,10 @@ public enum MyotusNetwork implements IMyotusNetwork {
                 .decoder(decoder::decode)
                 .consumerMainThread((message, contextSupplier) -> {
                     var forgeContext = contextSupplier.get();
-                    var context = new MyoPacketContext(forgeContext, replyPacket -> channel.reply(replyPacket, forgeContext));
+                    var context = new MyoPacketContext(forgeContext,
+                            replyPacket -> channel.reply(
+                                    requireRegisteredPacket(replyPacket, forgeContext.getDirection().reply()),
+                                    forgeContext));
                     handler.handle(message, context);
                 })
                 .add();
@@ -83,32 +88,65 @@ public enum MyotusNetwork implements IMyotusNetwork {
 
     @Override
     public synchronized int getPacketId(Class<? extends IMyotusPacket> packetType) {
-        Integer packetId = idsByType.get(packetType);
+        Class<? extends IMyotusPacket> type = Objects.requireNonNull(packetType, "packetType");
+        Integer packetId = idsByType.get(type);
         if (packetId == null) {
-            throw new IllegalStateException("Packet type is not registered: " + packetType.getName());
+            throw new IllegalStateException("Packet type is not registered: " + type.getName());
         }
         return packetId;
     }
 
     @Override
     public void sendToServer(IMyotusPacket packet) {
-        channel.sendToServer(Objects.requireNonNull(packet, "packet"));
+        IMyotusPacket message = requireRegisteredPacket(packet, NetworkDirection.PLAY_TO_SERVER);
+        if (FMLEnvironment.dist != Dist.CLIENT) {
+            throw new IllegalStateException("Cannot send a serverbound Myotus packet from a dedicated server");
+        }
+        channel.sendToServer(message);
     }
 
     @Override
     public void sendToPlayer(ServerPlayer player, IMyotusPacket packet) {
         ServerPlayer recipient = Objects.requireNonNull(player, "player");
-        channel.send(PacketDistributor.PLAYER.with(() -> recipient), Objects.requireNonNull(packet, "packet"));
+        IMyotusPacket message = requireRegisteredPacket(packet, NetworkDirection.PLAY_TO_CLIENT);
+        channel.send(PacketDistributor.PLAYER.with(() -> recipient), message);
     }
 
     @Override
     public void sendToAllClients(IMyotusPacket packet) {
-        channel.send(PacketDistributor.ALL.noArg(), Objects.requireNonNull(packet, "packet"));
+        IMyotusPacket message = requireRegisteredPacket(packet, NetworkDirection.PLAY_TO_CLIENT);
+        channel.send(PacketDistributor.ALL.noArg(), message);
     }
 
     @Override
     public void reply(IMyotusPacket packet, MyoPacketContext context) {
-        Objects.requireNonNull(context, "context").reply(Objects.requireNonNull(packet, "packet"));
+        MyoPacketContext packetContext = Objects.requireNonNull(context, "context");
+        IMyotusPacket message = requireRegisteredPacket(packet, packetContext.direction().reply());
+        packetContext.reply(message);
+    }
+
+    private IMyotusPacket requireRegisteredPacket(IMyotusPacket packet, NetworkDirection expectedDirection) {
+        IMyotusPacket message = Objects.requireNonNull(packet, "packet");
+        PacketRegistration<?> registration = getPacketRegistration(message.getClass());
+        if (registration.direction() != expectedDirection) {
+            throw new IllegalStateException("Packet type " + message.getClass().getName()
+                    + " is registered for " + registration.direction()
+                    + " but was sent as " + expectedDirection);
+        }
+        return message;
+    }
+
+    private synchronized PacketRegistration<?> getPacketRegistration(Class<? extends IMyotusPacket> packetType) {
+        Integer packetId = idsByType.get(packetType);
+        if (packetId == null) {
+            throw new IllegalStateException("Packet type is not registered: " + packetType.getName());
+        }
+
+        PacketRegistration<?> registration = packetsById.get(packetId);
+        if (registration == null) {
+            throw new IllegalStateException("Packet id " + packetId + " has no registration");
+        }
+        return registration;
     }
 
     private record PacketRegistration<T extends IMyotusPacket>(Class<T> packetType, NetworkDirection direction) {

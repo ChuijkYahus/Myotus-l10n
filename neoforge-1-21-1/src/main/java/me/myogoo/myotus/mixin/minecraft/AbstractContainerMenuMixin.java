@@ -24,7 +24,7 @@ public abstract class AbstractContainerMenuMixin {
                     ItemStack before = stack.copy();
                     card.onTerminalClose(menu, stack);
                     ItemStack current = slot.getItem();
-                    if (!ItemStack.isSameItemSameComponents(before, current)) {
+                    if (!ItemStack.matches(before, current)) {
                         slot.set(current);
                     }
                 }

@@ -5,6 +5,7 @@ import appeng.core.definitions.AEItems;
 import me.myogoo.myotus.Myotus;
 import me.myogoo.myotus.api.wt.AddTerminalEvent;
 import me.myogoo.myotus.impl.CreativeTabManager;
+import me.myogoo.myotus.util.mod.ModIntegrationManager;
 import net.minecraft.core.registries.Registries;
 import net.minecraft.network.chat.Component;
 import net.minecraft.resources.ResourceKey;
@@ -28,7 +29,7 @@ public final class MyoCreativeModeTabs {
                     .build());
 
     public static void addAE2WTLibTerminals(BuildCreativeModeTabContentsEvent event) {
-        if (event.getTabKey().equals(AE2WTLIB_TAB)) {
+        if (ModIntegrationManager.isLoaded("ae2wtlib") && event.getTabKey().equals(AE2WTLIB_TAB)) {
             AddTerminalEvent.addCreativeTabTerminals(event);
         }
     }

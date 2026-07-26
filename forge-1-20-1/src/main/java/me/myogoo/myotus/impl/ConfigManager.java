@@ -7,6 +7,7 @@ import net.minecraft.resources.ResourceLocation;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.Objects;
 
 public enum ConfigManager {
     INSTANCE;
@@ -14,6 +15,7 @@ public enum ConfigManager {
     private final Map<ResourceLocation, MyoConfigTab> tabs = new LinkedHashMap<>();
 
     public synchronized void registerTab(MyoConfigTab tab) {
+        Objects.requireNonNull(tab, "tab");
         var previous = tabs.putIfAbsent(tab.id(), tab);
         if (previous != null) {
             throw new IllegalArgumentException("Duplicate Myotus config tab id: " + tab.id());
