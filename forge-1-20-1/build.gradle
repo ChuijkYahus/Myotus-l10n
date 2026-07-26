@@ -134,6 +134,10 @@ publishing {
     }
 }
 
+tasks.matching { it.name == 'signMavenPublication' }.configureEach {
+    dependsOn 'reobfJarJar'
+}
+
 tasks.withType(org.gradle.api.publish.maven.tasks.AbstractPublishToMaven).configureEach {
-    dependsOn tasks.named('reobfJar')
+    dependsOn 'reobfJarJar'
 }

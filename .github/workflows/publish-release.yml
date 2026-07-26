@@ -1,14 +1,25 @@
-name: Publish GitHub Release
+name: Publish Myotus Release
 
 on:
   release:
     types: [published]
+  workflow_dispatch:
+    inputs:
+      release_tag:
+        description: Existing Myotus release tag to backfill to Maven Central
+        required: true
+        type: string
+      source_ref:
+        description: Source ref containing release-only publishing fixes
+        required: true
+        default: master
+        type: string
 
 permissions:
   contents: read
 
 concurrency:
-  group: publish-release-${{ github.repository }}-${{ github.event.release.tag_name }}
+  group: publish-release-${{ github.repository }}-${{ github.event.release.tag_name || inputs.release_tag }}
   cancel-in-progress: false
 
 jobs:
@@ -26,20 +37,31 @@ jobs:
       version_type: ${{ steps.metadata.outputs.version_type }}
 
     steps:
-      - name: Checkout release tag
+      - name: Checkout release source
         uses: actions/checkout@v6
         with:
-          ref: ${{ github.event.release.tag_name }}
+          ref: ${{ github.event_name == 'release' && github.event.release.tag_name || inputs.source_ref }}
           fetch-depth: 0
 
-      - name: Verify tag belongs to the default branch
+      - name: Verify source and release tag belong to the default branch
         env:
           DEFAULT_BRANCH: ${{ github.event.repository.default_branch }}
+          RELEASE_TAG: ${{ github.event.release.tag_name || inputs.release_tag }}
         run: |
           set -euo pipefail
           git fetch --no-tags origin "${DEFAULT_BRANCH}:refs/remotes/origin/${DEFAULT_BRANCH}"
-          if ! git merge-base --is-ancestor "$GITHUB_SHA" "refs/remotes/origin/${DEFAULT_BRANCH}"; then
-            echo "::error::Release tag ${GITHUB_REF_NAME} does not point to a commit on ${DEFAULT_BRANCH}."
+          git fetch --force origin "refs/tags/${RELEASE_TAG}:refs/tags/${RELEASE_TAG}"
+
+          source_sha="$(git rev-parse HEAD)"
+          release_sha="$(git rev-list -n 1 "refs/tags/${RELEASE_TAG}")"
+
+          if ! git merge-base --is-ancestor "$source_sha" "refs/remotes/origin/${DEFAULT_BRANCH}"; then
+            echo "::error::Release source ${source_sha} is not a commit on ${DEFAULT_BRANCH}."
+            exit 1
+          fi
+
+          if ! git merge-base --is-ancestor "$release_sha" "$source_sha"; then
+            echo "::error::Release tag ${RELEASE_TAG} is not an ancestor of the selected source."
             exit 1
           fi
 
@@ -47,8 +69,9 @@ jobs:
         id: metadata
         shell: bash
         env:
-          IS_PRERELEASE: ${{ github.event.release.prerelease }}
-          RELEASE_TAG: ${{ github.event.release.tag_name }}
+          EVENT_NAME: ${{ github.event_name }}
+          IS_PRERELEASE: ${{ github.event_name == 'release' && github.event.release.prerelease || false }}
+          RELEASE_TAG: ${{ github.event.release.tag_name || inputs.release_tag }}
         run: |
           set -euo pipefail
 
@@ -112,6 +135,19 @@ jobs:
             version_type="beta"
           fi
 
+          if [[ "$EVENT_NAME" == "workflow_dispatch" ]]; then
+            release_sha="$(git rev-list -n 1 "refs/tags/${RELEASE_TAG}")"
+            if ! git diff --quiet "$release_sha" HEAD -- \
+              common/src \
+              "${module}/src" \
+              "${module}/gradle.properties"
+            then
+              echo "::error::Manual Maven Central backfills may contain publishing fixes only."
+              echo "::error::Runtime sources or version properties differ from ${RELEASE_TAG}."
+              exit 1
+            fi
+          fi
+
           artifact_name="Myotus-${mc_version}-${mod_version}"
 
           echo "artifact_name=${artifact_name}" >> "$GITHUB_OUTPUT"
@@ -124,6 +160,7 @@ jobs:
           echo "version_type=${version_type}" >> "$GITHUB_OUTPUT"
 
       - name: Prepare release notes
+        if: github.event_name == 'release'
         env:
           RELEASE_BODY: ${{ github.event.release.body }}
         run: |
@@ -155,6 +192,30 @@ jobs:
       - name: Make Gradle wrapper executable
         run: chmod +x ./gradlew
 
+      - name: Verify Maven Central publishing secrets
+        env:
+          MAVEN_CENTRAL_USERNAME: ${{ secrets.MAVEN_CENTRAL_USERNAME }}
+          MAVEN_CENTRAL_PASSWORD: ${{ secrets.MAVEN_CENTRAL_PASSWORD }}
+          SIGNING_IN_MEMORY_KEY: ${{ secrets.SIGNING_IN_MEMORY_KEY }}
+          SIGNING_IN_MEMORY_KEY_PASSWORD: ${{ secrets.SIGNING_IN_MEMORY_KEY_PASSWORD }}
+        run: |
+          set -euo pipefail
+          missing=0
+
+          for name in \
+            MAVEN_CENTRAL_USERNAME \
+            MAVEN_CENTRAL_PASSWORD \
+            SIGNING_IN_MEMORY_KEY \
+            SIGNING_IN_MEMORY_KEY_PASSWORD
+          do
+            if [[ -z "${!name:-}" ]]; then
+              echo "::error::GitHub Actions secret ${name} is not configured."
+              missing=1
+            fi
+          done
+
+          exit "$missing"
+
       - name: Run common tests
         run: |
           ./gradlew :common:test \
@@ -181,6 +242,7 @@ jobs:
             --console=plain
 
       - name: Collect release artifacts
+        if: github.event_name == 'release'
         env:
           JAR: ${{ steps.metadata.outputs.jar }}
           TARGET_MODULE: ${{ steps.metadata.outputs.module }}
@@ -192,6 +254,7 @@ jobs:
           cp "$artifact_path" "dist/${JAR}"
 
       - name: Upload workflow artifact
+        if: github.event_name == 'release'
         uses: actions/upload-artifact@v7
         with:
           name: release-jars
@@ -199,9 +262,23 @@ jobs:
           if-no-files-found: error
           retention-days: 7
 
+      - name: Publish selected module to Maven Central
+        env:
+          TARGET_MODULE: ${{ steps.metadata.outputs.module }}
+          ORG_GRADLE_PROJECT_mavenCentralUsername: ${{ secrets.MAVEN_CENTRAL_USERNAME }}
+          ORG_GRADLE_PROJECT_mavenCentralPassword: ${{ secrets.MAVEN_CENTRAL_PASSWORD }}
+          ORG_GRADLE_PROJECT_signingInMemoryKey: ${{ secrets.SIGNING_IN_MEMORY_KEY }}
+          ORG_GRADLE_PROJECT_signingInMemoryKeyPassword: ${{ secrets.SIGNING_IN_MEMORY_KEY_PASSWORD }}
+        run: |
+          ./gradlew ":${TARGET_MODULE}:publishAndReleaseToMavenCentral" \
+            --build-cache \
+            --no-daemon \
+            --console=plain
+
   attach-github-release:
     name: Attach jar to GitHub Release
     needs: build
+    if: github.event_name == 'release'
     runs-on: ubuntu-latest
     permissions:
       contents: write
@@ -230,6 +307,7 @@ jobs:
     needs:
       - build
       - attach-github-release
+    if: github.event_name == 'release'
     runs-on: ubuntu-latest
 
     steps:

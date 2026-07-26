@@ -254,6 +254,12 @@ configure(modProjects) {
                 artifact(tasks.named('apiJar')) {
                     classifier = 'api'
                 }
+                artifact(tasks.named('sourcesJar')) {
+                    classifier = 'sources'
+                }
+                artifact(tasks.named('plainJavadocJar')) {
+                    classifier = 'javadoc'
+                }
             }
         }
     }
