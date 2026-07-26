@@ -22,7 +22,7 @@ public final class ExtendedAERecipes extends JsonRecipeProvider {
                 .inputItem(MyoItems.PRINTED_COMPAT_PROCESSOR.get(), 4)
                 .inputItem(AEItems.SILICON_PRINT.asItem(), 4)
                 .inputTag("c:dusts/redstone", 4)
-                .output(MyoItems.PRINTED_COMPAT_PROCESSOR.get(), 4)
+                .output(MyoItems.COMPAT_PROCESSOR.get(), 4)
                 .save(output);
 
         MyoExtendedAECircuitCutterRecipeBuilder
