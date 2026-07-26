@@ -10,5 +10,5 @@ import appeng.client.gui.style.WidgetStyle;
 @Mixin(value = ScreenStyle.class, remap = false)
 public interface ScreenStyleAccessor {
     @Accessor("widgets")
-    Map<String, WidgetStyle> getWidgets();
+    Map<String, WidgetStyle> myotus$getWidgets();
 }

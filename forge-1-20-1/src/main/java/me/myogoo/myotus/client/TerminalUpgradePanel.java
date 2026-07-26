@@ -1,6 +1,8 @@
 package me.myogoo.myotus.client;
 
+import java.util.IdentityHashMap;
 import java.util.List;
+import java.util.Map;
 import java.util.function.Consumer;
 
 import appeng.client.gui.Icon;
@@ -34,6 +36,8 @@ public class TerminalUpgradePanel implements ICompositeWidget {
 
     private static final int PANEL_WIDTH = PADDING + SLOT_SIZE + PADDING;
     private static final int PANEL_HEIGHT = PADDING + (SLOT_SIZE * SLOT_COUNT) + PADDING;
+    private static final int HIDDEN_SLOT_X = -9999;
+    private static final int HIDDEN_SLOT_Y = -9999;
 
     private static final Blitter BACKGROUND = Blitter.texture("guis/extra_panels.png", 128, 128);
 
@@ -46,14 +50,15 @@ public class TerminalUpgradePanel implements ICompositeWidget {
 
     // 가시성
     private boolean visible = false;
-    private boolean slotsHidden = false;
-
+    private final List<Slot> viewCellSlots;
     private final List<Slot> upgradeSlots;
+    private final Map<Slot, SlotState> hiddenSlots = new IdentityHashMap<>();
 
     private final MEStorageMenu menu;
 
     public TerminalUpgradePanel(MEStorageMenu menu, int terminalScreenWidth) {
         this.menu = menu;
+        this.viewCellSlots = menu.getSlots(SlotSemantics.VIEW_CELL);
         this.upgradeSlots = menu.getSlots(MyoSlotSemantics.MYO_UPGRADE_SLOT);
         setPosition(new Point(terminalScreenWidth, 0));
         configureUpgradeSlots(menu);
@@ -78,23 +83,40 @@ public class TerminalUpgradePanel implements ICompositeWidget {
         this.visible = visible;
         if (!visible) {
             hideSlots(); // 닫힐 때 슬롯 숨김
-        } else {
-            slotsHidden = false;
         }
     }
 
     private void hideSlots() {
-        if (slotsHidden) {
-            return;
-        }
-        menu.hideSlot(SlotSemantics.VIEW_CELL.id());
-        menu.hideSlot(MyoSlotSemantics.MYO_UPGRADE_SLOT.id());
+        hideViewCellSlots();
+        hideSlotList(upgradeSlots);
+    }
 
-        for (Slot slot : upgradeSlots) {
-            slot.x = -10000;
-            slot.y = -1000;
+    private void hideViewCellSlots() {
+        hideSlotList(viewCellSlots);
+    }
+
+    private void hideSlotList(List<Slot> slots) {
+        for (Slot slot : slots) {
+            hideSlot(slot);
         }
-        slotsHidden = true;
+    }
+
+    private void hideSlot(Slot slot) {
+        hiddenSlots.computeIfAbsent(slot, SlotState::capture);
+        if (slot instanceof AppEngSlot appEngSlot) {
+            appEngSlot.setActive(false);
+        }
+        slot.x = HIDDEN_SLOT_X;
+        slot.y = HIDDEN_SLOT_Y;
+    }
+
+    private void showSlotAt(Slot slot, int x, int y) {
+        SlotState state = hiddenSlots.remove(slot);
+        if (state != null) {
+            state.restore(slot);
+        }
+        slot.x = x;
+        slot.y = y;
     }
 
     @Override
@@ -124,7 +146,7 @@ public class TerminalUpgradePanel implements ICompositeWidget {
             hideSlots();
             return;
         }
-        slotsHidden = false;
+        hideViewCellSlots();
 
         // 패널 내 첫 번째 슬롯 좌표 (screen-relative: guiLeft/top 기준)
         int slotStartX = this.x;
@@ -132,8 +154,7 @@ public class TerminalUpgradePanel implements ICompositeWidget {
 
         for (int i = 0; i < Math.min(SLOT_COUNT, upgradeSlots.size()); i++) {
             Slot slot = upgradeSlots.get(i);
-            slot.x = slotStartX + 8;
-            slot.y = slotStartY + i * SLOT_SIZE + 1;
+            showSlotAt(slot, slotStartX + 8, slotStartY + i * SLOT_SIZE + 1);
         }
     }
 
@@ -239,6 +260,20 @@ public class TerminalUpgradePanel implements ICompositeWidget {
                     screenBounds.getY() + y,
                     PANEL_WIDTH,
                     PANEL_HEIGHT));
+        }
+    }
+
+    private record SlotState(int x, int y, boolean active) {
+        private static SlotState capture(Slot slot) {
+            return new SlotState(slot.x, slot.y, slot.isActive());
+        }
+
+        private void restore(Slot slot) {
+            if (slot instanceof AppEngSlot appEngSlot) {
+                appEngSlot.setActive(active);
+            }
+            slot.x = x;
+            slot.y = y;
         }
     }
 }

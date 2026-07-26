@@ -1,5 +1,6 @@
 package me.myogoo.myotus.mixin.ae2;
 
+import appeng.client.Point;
 import appeng.client.gui.AEBaseScreen;
 import appeng.client.gui.me.common.MEStorageScreen;
 import appeng.client.gui.me.common.TerminalSettingsScreen;
@@ -57,7 +58,8 @@ public class MEStorageScreenMixin extends AEBaseScreen<AEBaseMenu> {
     private void myotus$addFloatingSubScreen(CallbackInfo ci) {
         WidgetStyle customStyle = new WidgetStyle();
         customStyle.setRight(-3);
-        ((ScreenStyleAccessor) (Object) style).getWidgets().put(TerminalUpgradePanel.WIDGET_ID, customStyle);
+        ((ScreenStyleAccessor) (Object) style).myotus$getWidgets()
+                .put(TerminalUpgradePanel.WIDGET_ID, customStyle);
         if (this.menu instanceof MEStorageMenu storageMenu) {
             boolean isAe2WtlibScreen = myotus$isAe2WtlibMenuHost(storageMenu.getHost());
             myotus$floatingSubScreen = new TerminalUpgradePanel(storageMenu, this.imageWidth, isAe2WtlibScreen);
@@ -114,29 +116,46 @@ public class MEStorageScreenMixin extends AEBaseScreen<AEBaseMenu> {
     }
 
     @Inject(method = "init", at = @At("HEAD"))
-    protected void repositionSubSidePanel(CallbackInfo ci) {
+    protected void initPanel(CallbackInfo ci) {
         myotus$updateToggleButtonVisibility();
         if (myotus$floatingSubScreen != null) {
             myotus$floatingSubScreen.setVisible(MyotusConfig.CLIENT.openSidePanel.get());
-
         }
-        WidgetStyle sidePanelStyle = ((ScreenStyleAccessor) (Object) style).getWidgets().get(TerminalUpgradePanel.WIDGET_ID);
-        WidgetContainerAccessor widgetsAccessor = (WidgetContainerAccessor) this.widgets;
-        sidePanelStyle.setRight(3);
+        WidgetStyle sidePanelStyle = ((ScreenStyleAccessor) (Object) style).myotus$getWidgets()
+                .get(TerminalUpgradePanel.WIDGET_ID);
+        ((ScreenStyleAccessor) (Object) style).myotus$getWidgets()
+                .put(TerminalUpgradePanel.WIDGET_ID, sidePanelStyle);
+    }
 
-        if (ModIntegrationManager.isLoaded(AE2WTLib.class)) {
-            var WtUpgradesPanel = widgetsAccessor.getCompositeWidgets().getOrDefault(MYOTUS$AE2WTLIB_UPGRADES_ID, null);
-            AE2WTLibClientCompat.configureScrollingUpgradesPanel(WtUpgradesPanel,
-                    myotus$getVisibleRowsForNextInit()).ifPresent(scrolling ->
-                            sidePanelStyle.setRight(scrolling ? -34 : -26));
+    @Inject(method = "init", at = @At("TAIL"))
+    protected void repositionPanel(CallbackInfo ci) {
+        if (myotus$floatingSubScreen == null) {
+            return;
         }
-        ((ScreenStyleAccessor) (Object) style).getWidgets().put(TerminalUpgradePanel.WIDGET_ID, sidePanelStyle);
+
+        var composites = ((WidgetContainerAccessor) this.widgets)
+                .myotus$getCompositeWidgets();
+
+        int panelX = this.imageWidth - 3;
+
+        var scrollingUpgrades = composites.get("scrollingUpgrades");
+        if (scrollingUpgrades != null && scrollingUpgrades.isVisible()) {
+            var bounds = scrollingUpgrades.getBounds();
+            panelX = bounds.getX() + bounds.getWidth();
+        } else {
+            var upgrades = composites.get("upgrades");
+            if (upgrades != null && upgrades.isVisible()) {
+                var bounds = upgrades.getBounds();
+                panelX = bounds.getX() + bounds.getWidth();
+            }
+        }
+
+        myotus$floatingSubScreen.setPosition(new Point(panelX, 0));
     }
 
     @Unique
     private boolean myotus$isAe2WtlibMenuHost(Object host) {
-        return host != null
-                && ModIntegrationManager.isLoaded(AE2WTLib.class)
+        return ModIntegrationManager.isLoaded(AE2WTLib.class)
                 && AE2WTLibClientCompat.isMenuHost(host);
     }
 
