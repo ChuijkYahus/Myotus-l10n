@@ -194,19 +194,21 @@ jobs:
 
       - name: Verify Maven Central publishing secrets
         env:
-          MAVEN_CENTRAL_USERNAME: ${{ secrets.MAVEN_CENTRAL_USERNAME }}
-          MAVEN_CENTRAL_PASSWORD: ${{ secrets.MAVEN_CENTRAL_PASSWORD }}
-          SIGNING_IN_MEMORY_KEY: ${{ secrets.SIGNING_IN_MEMORY_KEY }}
-          SIGNING_IN_MEMORY_KEY_PASSWORD: ${{ secrets.SIGNING_IN_MEMORY_KEY_PASSWORD }}
+          MAVEN_ID: ${{ secrets.MAVEN_ID }}
+          MAVEN_PW: ${{ secrets.MAVEN_PW }}
+          GPG_IN_MEMORY_KEY: ${{ secrets.GPG_IN_MEMORY_KEY }}
+          GPG_KEY_ID: ${{ secrets.GPG_KEY_ID }}
+          GPG_PASSWORD: ${{ secrets.GPG_PASSWORD }}
         run: |
           set -euo pipefail
           missing=0
 
           for name in \
-            MAVEN_CENTRAL_USERNAME \
-            MAVEN_CENTRAL_PASSWORD \
-            SIGNING_IN_MEMORY_KEY \
-            SIGNING_IN_MEMORY_KEY_PASSWORD
+            MAVEN_ID \
+            MAVEN_PW \
+            GPG_IN_MEMORY_KEY \
+            GPG_KEY_ID \
+            GPG_PASSWORD
           do
             if [[ -z "${!name:-}" ]]; then
               echo "::error::GitHub Actions secret ${name} is not configured."
@@ -265,10 +267,11 @@ jobs:
       - name: Publish selected module to Maven Central
         env:
           TARGET_MODULE: ${{ steps.metadata.outputs.module }}
-          ORG_GRADLE_PROJECT_mavenCentralUsername: ${{ secrets.MAVEN_CENTRAL_USERNAME }}
-          ORG_GRADLE_PROJECT_mavenCentralPassword: ${{ secrets.MAVEN_CENTRAL_PASSWORD }}
-          ORG_GRADLE_PROJECT_signingInMemoryKey: ${{ secrets.SIGNING_IN_MEMORY_KEY }}
-          ORG_GRADLE_PROJECT_signingInMemoryKeyPassword: ${{ secrets.SIGNING_IN_MEMORY_KEY_PASSWORD }}
+          ORG_GRADLE_PROJECT_mavenCentralUsername: ${{ secrets.MAVEN_ID }}
+          ORG_GRADLE_PROJECT_mavenCentralPassword: ${{ secrets.MAVEN_PW }}
+          ORG_GRADLE_PROJECT_signingInMemoryKey: ${{ secrets.GPG_IN_MEMORY_KEY }}
+          ORG_GRADLE_PROJECT_signingInMemoryKeyId: ${{ secrets.GPG_KEY_ID }}
+          ORG_GRADLE_PROJECT_signingInMemoryKeyPassword: ${{ secrets.GPG_PASSWORD }}
         run: |
           ./gradlew ":${TARGET_MODULE}:publishAndReleaseToMavenCentral" \
             --build-cache \
