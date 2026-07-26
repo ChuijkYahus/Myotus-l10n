@@ -127,7 +127,7 @@ public class MEStorageScreenMixin extends AEBaseScreen<AEBaseMenu> {
                 .put(TerminalUpgradePanel.WIDGET_ID, sidePanelStyle);
     }
 
-    @Inject(method = "init", at = @At("TAIL"))
+    @Inject(method = "init", at = @At("TAIL"), order = 0)
     protected void repositionPanel(CallbackInfo ci) {
         if (myotus$floatingSubScreen == null) {
             return;
@@ -138,18 +138,18 @@ public class MEStorageScreenMixin extends AEBaseScreen<AEBaseMenu> {
 
         int panelX = this.imageWidth - 3;
 
+
+        var upgrades = composites.get("upgrades");
         var scrollingUpgrades = composites.get("scrollingUpgrades");
-        if (scrollingUpgrades != null && scrollingUpgrades.isVisible()) {
-            var bounds = scrollingUpgrades.getBounds();
-            panelX = bounds.getX() + bounds.getWidth();
-        } else {
-            var upgrades = composites.get("upgrades");
-            if (upgrades != null && upgrades.isVisible()) {
+        if (this.menu instanceof MEStorageMenu storageMenu) {
+            if (myotus$isAe2WtlibMenuHost(storageMenu.getHost()) && upgrades != null && upgrades.isVisible()) {
                 var bounds = upgrades.getBounds();
+                panelX = bounds.getX() + bounds.getWidth();
+            } if (scrollingUpgrades != null && scrollingUpgrades.isVisible()) {
+                var bounds = scrollingUpgrades.getBounds();
                 panelX = bounds.getX() + bounds.getWidth();
             }
         }
-
         myotus$floatingSubScreen.setPosition(new Point(panelX, 0));
     }
 
