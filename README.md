@@ -13,8 +13,8 @@ stable bridge that other AE2-related mods can depend on.
 
 | Module | Loader | Minecraft | Java | AE2 | Artifact version |
 | --- | --- | --- | --- | --- | --- |
-| `forge-1-20-1` | Forge `47.x` | `1.20.1` | `17` | `15.4.x` | `15.1.2-SNAPSHOT` |
-| `neoforge-1-21-1` | NeoForge `21.1.x` | `1.21.1` | `21` | `19.2.x` | `19.1.2-SNAPSHOT` |
+| `forge-1-20-1` | Forge `47.x` | `1.20.1` | `17` | `15.4.x` | `15.1.3-SNAPSHOT` |
+| `neoforge-1-21-1` | NeoForge `21.1.x` | `1.21.1` | `21` | `19.2.x` | `19.1.3-SNAPSHOT` |
 
 The project has a shared `common` source set plus loader-specific modules. Forge and
 NeoForge APIs are kept separate when Minecraft/loader differences make that healthier
@@ -63,12 +63,12 @@ repositories {
 
 dependencies {
     // Forge 1.20.1 line: mapped compile API plus the loader-discoverable runtime mod
-    compileOnly "me.myogoo:myotus:15.1.2-SNAPSHOT:api"
-    runtimeOnly fg.deobf("me.myogoo:myotus:15.1.2-SNAPSHOT")
+    compileOnly "me.myogoo:myotus:15.1.3-SNAPSHOT:api"
+    runtimeOnly fg.deobf("me.myogoo:myotus:15.1.3-SNAPSHOT")
 
     // NeoForge 1.21.1 line
-    // compileOnly "me.myogoo:myotus:19.1.2-SNAPSHOT:api"
-    // runtimeOnly "me.myogoo:myotus:19.1.2-SNAPSHOT"
+    // compileOnly "me.myogoo:myotus:19.1.3-SNAPSHOT:api"
+    // runtimeOnly "me.myogoo:myotus:19.1.3-SNAPSHOT"
 }
 ```
 
