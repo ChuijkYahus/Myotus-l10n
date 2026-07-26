@@ -99,7 +99,7 @@ jobs:
             "${forge_mc_version}-"*)
               module="forge-1-20-1"
               mc_version="$forge_mc_version"
-              mod_version="$forge_mod_version"
+              base_mod_version="$forge_mod_version"
               mod_loader="$forge_mod_loader"
               version_type="$forge_version_type"
               java_version="$forge_java_version"
@@ -107,7 +107,7 @@ jobs:
             "${neoforge_mc_version}-"*)
               module="neoforge-1-21-1"
               mc_version="$neoforge_mc_version"
-              mod_version="$neoforge_mod_version"
+              base_mod_version="$neoforge_mod_version"
               mod_loader="$neoforge_mod_loader"
               version_type="$neoforge_version_type"
               java_version="$neoforge_java_version"
@@ -119,15 +119,25 @@ jobs:
               ;;
           esac
 
-          if [[ "$mod_version" == *-SNAPSHOT ]]; then
+          if [[ "$base_mod_version" == *-SNAPSHOT ]]; then
             echo "::error::Release builds require a non-SNAPSHOT Myotus version."
-            echo "::error::Found ${module} using Myotus ${mod_version}."
+            echo "::error::Found ${module} using Myotus ${base_mod_version}."
             exit 1
           fi
 
-          expected_version="${mc_version}-${mod_version}"
-          if [[ "$release_version" != "$expected_version" ]]; then
-            echo "::error::Release tag '${RELEASE_TAG}' must be '${expected_version}', optionally prefixed with 'v'."
+          expected_version="${mc_version}-${base_mod_version}"
+          if [[ "$release_version" == "$expected_version" ]]; then
+            mod_version="$base_mod_version"
+          elif [[ "$release_version" == "${expected_version}-"* ]]; then
+            version_qualifier="${release_version#"${expected_version}-"}"
+            if [[ ! "$version_qualifier" =~ ^hotfix[0-9]*$ ]]; then
+              echo "::error::Release tag qualifier '${version_qualifier}' is not supported."
+              echo "::error::Use '${expected_version}-hotfix', '${expected_version}-hotfix0', '${expected_version}-hotfix1', and so on."
+              exit 1
+            fi
+            mod_version="${base_mod_version}-${version_qualifier}"
+          else
+            echo "::error::Release tag '${RELEASE_TAG}' must be '${expected_version}' or '${expected_version}-hotfix<N>', optionally prefixed with 'v'."
             exit 1
           fi
 
@@ -227,18 +237,22 @@ jobs:
 
       - name: Generate selected Minecraft version data
         env:
+          RELEASE_MOD_VERSION: ${{ steps.metadata.outputs.mod_version }}
           TARGET_MODULE: ${{ steps.metadata.outputs.module }}
         run: |
           ./gradlew ":${TARGET_MODULE}:runData" \
+            -Pmod_version="${RELEASE_MOD_VERSION}" \
             --build-cache \
             --no-daemon \
             --console=plain
 
       - name: Build selected Minecraft version
         env:
+          RELEASE_MOD_VERSION: ${{ steps.metadata.outputs.mod_version }}
           TARGET_MODULE: ${{ steps.metadata.outputs.module }}
         run: |
           ./gradlew ":${TARGET_MODULE}:build" \
+            -Pmod_version="${RELEASE_MOD_VERSION}" \
             --build-cache \
             --no-daemon \
             --console=plain
@@ -266,6 +280,7 @@ jobs:
 
       - name: Publish selected module to Maven Central
         env:
+          RELEASE_MOD_VERSION: ${{ steps.metadata.outputs.mod_version }}
           TARGET_MODULE: ${{ steps.metadata.outputs.module }}
           ORG_GRADLE_PROJECT_mavenCentralUsername: ${{ secrets.MAVEN_ID }}
           ORG_GRADLE_PROJECT_mavenCentralPassword: ${{ secrets.MAVEN_PW }}
@@ -274,6 +289,7 @@ jobs:
           ORG_GRADLE_PROJECT_signingInMemoryKeyPassword: ${{ secrets.GPG_PASSWORD }}
         run: |
           ./gradlew ":${TARGET_MODULE}:publishAndReleaseToMavenCentral" \
+            -Pmod_version="${RELEASE_MOD_VERSION}" \
             --build-cache \
             --no-daemon \
             --console=plain

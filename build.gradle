@@ -13,7 +13,10 @@ def loadProjectProperties = { Project target ->
     def properties = new Properties()
     propertiesFile.withInputStream { properties.load(it) }
     properties.each { key, value ->
-        target.extensions.extraProperties.set(key.toString(), value)
+        def propertyName = key.toString()
+        if (!target.hasProperty(propertyName)) {
+            target.extensions.extraProperties.set(propertyName, value)
+        }
     }
 }
 
