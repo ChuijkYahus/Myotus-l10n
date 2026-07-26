@@ -1,0 +1,275 @@
+name: Publish GitHub Release
+
+on:
+  release:
+    types: [published]
+
+permissions:
+  contents: read
+
+concurrency:
+  group: publish-release-${{ github.repository }}-${{ github.event.release.tag_name }}
+  cancel-in-progress: false
+
+jobs:
+  build:
+    name: Build release artifact
+    runs-on: ubuntu-latest
+    outputs:
+      artifact_name: ${{ steps.metadata.outputs.artifact_name }}
+      jar: ${{ steps.metadata.outputs.jar }}
+      java_version: ${{ steps.metadata.outputs.java_version }}
+      mc_version: ${{ steps.metadata.outputs.mc_version }}
+      mod_loader: ${{ steps.metadata.outputs.mod_loader }}
+      mod_version: ${{ steps.metadata.outputs.mod_version }}
+      module: ${{ steps.metadata.outputs.module }}
+      version_type: ${{ steps.metadata.outputs.version_type }}
+
+    steps:
+      - name: Checkout release tag
+        uses: actions/checkout@v6
+        with:
+          ref: ${{ github.event.release.tag_name }}
+          fetch-depth: 0
+
+      - name: Verify tag belongs to the default branch
+        env:
+          DEFAULT_BRANCH: ${{ github.event.repository.default_branch }}
+        run: |
+          set -euo pipefail
+          git fetch --no-tags origin "${DEFAULT_BRANCH}:refs/remotes/origin/${DEFAULT_BRANCH}"
+          if ! git merge-base --is-ancestor "$GITHUB_SHA" "refs/remotes/origin/${DEFAULT_BRANCH}"; then
+            echo "::error::Release tag ${GITHUB_REF_NAME} does not point to a commit on ${DEFAULT_BRANCH}."
+            exit 1
+          fi
+
+      - name: Read release metadata
+        id: metadata
+        shell: bash
+        env:
+          IS_PRERELEASE: ${{ github.event.release.prerelease }}
+          RELEASE_TAG: ${{ github.event.release.tag_name }}
+        run: |
+          set -euo pipefail
+
+          read_property() {
+            local property_name="$1"
+            local properties_file="$2"
+            sed -n "s/^${property_name}=//p" "$properties_file" | tr -d '\r' | tail -n 1
+          }
+
+          forge_mc_version="$(read_property minecraft_version forge-1-20-1/gradle.properties)"
+          forge_mod_version="$(read_property mod_version forge-1-20-1/gradle.properties)"
+          forge_mod_loader="$(read_property mod_loader forge-1-20-1/gradle.properties)"
+          forge_version_type="$(read_property mod_version_type forge-1-20-1/gradle.properties)"
+          forge_java_version="$(read_property java_version forge-1-20-1/gradle.properties)"
+
+          neoforge_mc_version="$(read_property minecraft_version neoforge-1-21-1/gradle.properties)"
+          neoforge_mod_version="$(read_property mod_version neoforge-1-21-1/gradle.properties)"
+          neoforge_mod_loader="$(read_property mod_loader neoforge-1-21-1/gradle.properties)"
+          neoforge_version_type="$(read_property mod_version_type neoforge-1-21-1/gradle.properties)"
+          neoforge_java_version="$(read_property java_version neoforge-1-21-1/gradle.properties)"
+
+          release_version="${RELEASE_TAG#v}"
+
+          case "$release_version" in
+            "${forge_mc_version}-"*)
+              module="forge-1-20-1"
+              mc_version="$forge_mc_version"
+              mod_version="$forge_mod_version"
+              mod_loader="$forge_mod_loader"
+              version_type="$forge_version_type"
+              java_version="$forge_java_version"
+              ;;
+            "${neoforge_mc_version}-"*)
+              module="neoforge-1-21-1"
+              mc_version="$neoforge_mc_version"
+              mod_version="$neoforge_mod_version"
+              mod_loader="$neoforge_mod_loader"
+              version_type="$neoforge_version_type"
+              java_version="$neoforge_java_version"
+              ;;
+            *)
+              echo "::error::Release tag '${RELEASE_TAG}' does not match a releasable Myotus version."
+              echo "::error::Expected a tag for Minecraft ${forge_mc_version} or ${neoforge_mc_version}, optionally prefixed with 'v'."
+              exit 1
+              ;;
+          esac
+
+          if [[ "$mod_version" == *-SNAPSHOT ]]; then
+            echo "::error::Release builds require a non-SNAPSHOT Myotus version."
+            echo "::error::Found ${module} using Myotus ${mod_version}."
+            exit 1
+          fi
+
+          expected_version="${mc_version}-${mod_version}"
+          if [[ "$release_version" != "$expected_version" ]]; then
+            echo "::error::Release tag '${RELEASE_TAG}' must be '${expected_version}', optionally prefixed with 'v'."
+            exit 1
+          fi
+
+          if [[ "$IS_PRERELEASE" == "true" && "$version_type" == "release" ]]; then
+            version_type="beta"
+          fi
+
+          artifact_name="Myotus-${mc_version}-${mod_version}"
+
+          echo "artifact_name=${artifact_name}" >> "$GITHUB_OUTPUT"
+          echo "jar=${artifact_name}.jar" >> "$GITHUB_OUTPUT"
+          echo "java_version=${java_version}" >> "$GITHUB_OUTPUT"
+          echo "mc_version=${mc_version}" >> "$GITHUB_OUTPUT"
+          echo "mod_loader=${mod_loader}" >> "$GITHUB_OUTPUT"
+          echo "mod_version=${mod_version}" >> "$GITHUB_OUTPUT"
+          echo "module=${module}" >> "$GITHUB_OUTPUT"
+          echo "version_type=${version_type}" >> "$GITHUB_OUTPUT"
+
+      - name: Prepare release notes
+        env:
+          RELEASE_BODY: ${{ github.event.release.body }}
+        run: |
+          set -euo pipefail
+          mkdir -p dist
+
+          if [[ -n "${RELEASE_BODY//[[:space:]]/}" ]]; then
+            printf '%s\n' "$RELEASE_BODY" > dist/release-notes.md
+          elif [[ -s CHANGELOG.md ]]; then
+            cp CHANGELOG.md dist/release-notes.md
+          else
+            echo "::error::The GitHub Release body and CHANGELOG.md are both empty."
+            exit 1
+          fi
+
+      - name: Set up Java 17 and 21
+        uses: actions/setup-java@v5
+        with:
+          distribution: microsoft
+          java-version: |
+            17
+            21
+
+      - name: Set up Gradle
+        uses: gradle/actions/setup-gradle@v6
+        with:
+          cache-read-only: false
+
+      - name: Make Gradle wrapper executable
+        run: chmod +x ./gradlew
+
+      - name: Run common tests
+        run: |
+          ./gradlew :common:test \
+            --build-cache \
+            --no-daemon \
+            --console=plain
+
+      - name: Generate selected Minecraft version data
+        env:
+          TARGET_MODULE: ${{ steps.metadata.outputs.module }}
+        run: |
+          ./gradlew ":${TARGET_MODULE}:runData" \
+            --build-cache \
+            --no-daemon \
+            --console=plain
+
+      - name: Build selected Minecraft version
+        env:
+          TARGET_MODULE: ${{ steps.metadata.outputs.module }}
+        run: |
+          ./gradlew ":${TARGET_MODULE}:build" \
+            --build-cache \
+            --no-daemon \
+            --console=plain
+
+      - name: Collect release artifacts
+        env:
+          JAR: ${{ steps.metadata.outputs.jar }}
+          TARGET_MODULE: ${{ steps.metadata.outputs.module }}
+        run: |
+          set -euo pipefail
+
+          artifact_path="${TARGET_MODULE}/build/libs/${JAR}"
+          test -f "$artifact_path"
+          cp "$artifact_path" "dist/${JAR}"
+
+      - name: Upload workflow artifact
+        uses: actions/upload-artifact@v7
+        with:
+          name: release-jars
+          path: dist/
+          if-no-files-found: error
+          retention-days: 7
+
+  attach-github-release:
+    name: Attach jar to GitHub Release
+    needs: build
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+
+    steps:
+      - name: Download release artifacts
+        uses: actions/download-artifact@v8
+        with:
+          name: release-jars
+          path: dist
+
+      - name: Upload jar to the existing release
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+          RELEASE_TAG: ${{ github.event.release.tag_name }}
+          JAR: ${{ needs.build.outputs.jar }}
+        run: |
+          set -euo pipefail
+          gh release upload "$RELEASE_TAG" \
+            "dist/${JAR}" \
+            --clobber
+
+  publish-platforms:
+    name: Publish ${{ needs.build.outputs.module }}
+    needs:
+      - build
+      - attach-github-release
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Download release artifacts
+        uses: actions/download-artifact@v8
+        with:
+          name: release-jars
+          path: dist
+
+      - name: Verify release payload
+        env:
+          JAR: ${{ needs.build.outputs.jar }}
+        run: |
+          set -euo pipefail
+          test -f "dist/${JAR}"
+          test -s dist/release-notes.md
+
+      - name: Publish to Modrinth and CurseForge
+        uses: Kira-NT/mc-publish@52307b03863581dec6b652b83e597aec02ebb075 # v3.3
+        with:
+          modrinth-id: 32YA23Pp
+          modrinth-token: ${{ secrets.MODRINTH_TOKEN }}
+          modrinth-featured: ${{ needs.build.outputs.version_type == 'release' }}
+
+          curseforge-id: 1496024
+          curseforge-token: ${{ secrets.CURSEFORGE_TOKEN }}
+
+          name: ${{ needs.build.outputs.artifact_name }}
+          version: ${{ needs.build.outputs.mc_version }}-${{ needs.build.outputs.mod_version }}
+          version-type: ${{ needs.build.outputs.version_type }}
+          changelog-file: dist/release-notes.md
+          files: dist/${{ needs.build.outputs.jar }}
+          game-versions: ${{ needs.build.outputs.mc_version }}
+          loaders: ${{ needs.build.outputs.mod_loader }}
+          environment: "client | server"
+          java: ${{ needs.build.outputs.java_version }}
+          retry-attempts: 2
+          retry-delay: 10000
+          fail-mode: fail
+
+          dependencies: |
+            ae2(required){modrinth:XxWD5pD3}{curseforge:223794}
+            ae2wtlib(optional){modrinth:pNabrMMw}{curseforge:459929}
