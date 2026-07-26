@@ -19,9 +19,13 @@ import java.lang.annotation.ElementType;
 import java.lang.annotation.Retention;
 import java.lang.annotation.RetentionPolicy;
 import java.lang.annotation.Target;
-import java.lang.reflect.Field;
 import java.util.HashMap;
 import java.util.Map;
+import java.util.concurrent.CountDownLatch;
+import java.util.concurrent.ExecutorService;
+import java.util.concurrent.Executors;
+import java.util.concurrent.Future;
+import java.util.concurrent.TimeUnit;
 import java.util.stream.Stream;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
@@ -34,19 +38,20 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 
 class ModIntegrationManagerTest {
     @BeforeEach
-    void setUp() throws ReflectiveOperationException {
+    void setUp() {
         clearManager();
     }
 
     @AfterEach
-    void tearDown() throws ReflectiveOperationException {
+    void tearDown() {
         clearManager();
     }
 
     @Test
-    void isLoadedAcceptsMetaAnnotatedAnnotationQueries() throws ReflectiveOperationException {
-        MyoModDto mod = activeMod(FirstIntegration.class, "first");
-        activate(mod);
+    void isLoadedAcceptsMetaAnnotatedAnnotationQueries() {
+        AnnotationScanner.setAnnotationProvider(() -> Stream.of(myoModAnnotation(FirstIntegration.class,
+                ElementType.ANNOTATION_TYPE)));
+        ModIntegrationManager.setModList(modList("first"));
 
         assertTrue(ModIntegrationManager.isLoaded(FirstIntegration.class));
         assertTrue(ModIntegrationManager.isLoaded(ExFirstIntegration.class));
@@ -115,6 +120,78 @@ class ModIntegrationManagerTest {
     }
 
     @Test
+    void failedReloadKeepsThePreviouslyPublishedState() {
+        AnnotationScanner.setAnnotationProvider(() -> Stream.of(myoModAnnotation(FirstIntegration.class,
+                ElementType.ANNOTATION_TYPE)));
+        ModIntegrationManager.setModList(modList("first"));
+
+        AnnotationScanner.setAnnotationProvider(() -> Stream.of(
+                myoModAnnotation(FirstConflictingRangeIntegration.class, ElementType.ANNOTATION_TYPE),
+                myoModAnnotation(SecondConflictingRangeIntegration.class, ElementType.ANNOTATION_TYPE)));
+
+        assertThrows(IllegalStateException.class,
+                () -> ModIntegrationManager.setModList(modList("conflicting_ranges")));
+
+        assertTrue(ModIntegrationManager.isRegistered(FirstIntegration.class));
+        assertTrue(ModIntegrationManager.isLoaded(FirstIntegration.class));
+        assertSame(FirstIntegration.class, ModIntegrationManager.getClass("first"));
+        assertFalse(ModIntegrationManager.isRegistered(FirstConflictingRangeIntegration.class));
+        assertFalse(ModIntegrationManager.isRegistered(SecondConflictingRangeIntegration.class));
+        assertEquals(1, ModIntegrationManager.getActiveIntegrations().size());
+    }
+
+    @Test
+    void readersKeepSeeingThePreviousStateWhileAReloadIsBeingBuilt() throws Exception {
+        AnnotationScanner.setAnnotationProvider(() -> Stream.of(myoModAnnotation(FirstIntegration.class,
+                ElementType.ANNOTATION_TYPE)));
+        ModIntegrationManager.setModList(modList("first"));
+
+        CountDownLatch buildStarted = new CountDownLatch(1);
+        CountDownLatch allowBuildToFinish = new CountDownLatch(1);
+        IModList blockingModList = new IModList() {
+            @Override
+            public boolean isLoaded(String modId) {
+                buildStarted.countDown();
+                try {
+                    if (!allowBuildToFinish.await(5, TimeUnit.SECONDS)) {
+                        throw new IllegalStateException("Timed out waiting to finish the test reload");
+                    }
+                } catch (InterruptedException e) {
+                    Thread.currentThread().interrupt();
+                    throw new IllegalStateException("Interrupted while waiting to finish the test reload", e);
+                }
+                return "first".equals(modId);
+            }
+
+            @Override
+            public MyoModInfo getModInfoById(String modId) {
+                return "first".equals(modId) ? modInfo("first", "1.0.0") : null;
+            }
+        };
+
+        ExecutorService executor = Executors.newSingleThreadExecutor();
+        Future<?> reload = executor.submit(() -> ModIntegrationManager.setModList(blockingModList));
+        try {
+            assertTrue(buildStarted.await(5, TimeUnit.SECONDS));
+
+            Map<MyoModDto, Class<? extends Annotation>> visibleState =
+                    ModIntegrationManager.getActiveIntegrations();
+            assertEquals(1, visibleState.size());
+            assertTrue(visibleState.containsValue(FirstIntegration.class));
+            assertTrue(ModIntegrationManager.isLoaded(FirstIntegration.class));
+            assertSame(FirstIntegration.class, ModIntegrationManager.getClass("first"));
+
+            allowBuildToFinish.countDown();
+            reload.get(5, TimeUnit.SECONDS);
+        } finally {
+            allowBuildToFinish.countDown();
+            executor.shutdownNow();
+        }
+
+        assertTrue(ModIntegrationManager.isLoaded(FirstIntegration.class));
+    }
+
+    @Test
     void activeIntegrationsSnapshotIsReadOnly() {
         AnnotationScanner.setAnnotationProvider(() -> Stream.of(myoModAnnotation(FirstIntegration.class,
                 ElementType.ANNOTATION_TYPE)));
@@ -123,6 +200,20 @@ class ModIntegrationManagerTest {
         assertThrows(UnsupportedOperationException.class,
                 () -> ModIntegrationManager.getActiveIntegrations().clear());
         assertTrue(ModIntegrationManager.isLoaded(FirstIntegration.class));
+    }
+
+    @Test
+    void activeIntegrationsSnapshotDoesNotChangeWhenManagerIsReloaded() {
+        AnnotationScanner.setAnnotationProvider(() -> Stream.of(myoModAnnotation(FirstIntegration.class,
+                ElementType.ANNOTATION_TYPE)));
+        ModIntegrationManager.setModList(modList("first"));
+        var snapshot = ModIntegrationManager.getActiveIntegrations();
+
+        ModIntegrationManager.setModList(IModList.EMPTY);
+
+        assertEquals(1, snapshot.size());
+        assertTrue(snapshot.containsValue(FirstIntegration.class));
+        assertTrue(ModIntegrationManager.getActiveIntegrations().isEmpty());
     }
 
     @Test
@@ -246,6 +337,24 @@ class ModIntegrationManagerTest {
         assertEquals("2.0.0", exception.getMinimumVersion().toString());
         assertEquals("1.5.0", exception.getModVersion().toString());
         assertEquals("[2.0.0,)", exception.getVersionRange());
+        assertTrue(exception.getMessage().contains("required range [2.0.0,)"));
+    }
+
+    @Test
+    void incompatibleMergedRangesFailOnlyWhenTheTargetModIsLoaded() {
+        AnnotationScanner.setAnnotationProvider(() -> Stream.of(
+                myoModAnnotation(FirstConflictingRangeIntegration.class, ElementType.ANNOTATION_TYPE),
+                myoModAnnotation(SecondConflictingRangeIntegration.class, ElementType.ANNOTATION_TYPE)));
+
+        ModIntegrationManager.setModList(IModList.EMPTY);
+        assertTrue(ModIntegrationManager.isRegistered(FirstConflictingRangeIntegration.class));
+        assertTrue(ModIntegrationManager.isRegistered(SecondConflictingRangeIntegration.class));
+
+        IllegalStateException exception = assertThrows(IllegalStateException.class,
+                () -> ModIntegrationManager.setModList(modList("conflicting_ranges")));
+        assertTrue(exception.getMessage().contains("conflicting_ranges"));
+        assertTrue(exception.getMessage().contains("[1.0.0,2.0.0)"));
+        assertTrue(exception.getMessage().contains("[2.0.0,3.0.0)"));
     }
 
     @Test
@@ -506,14 +615,6 @@ class ModIntegrationManagerTest {
         assertTrue(exception.getMessage().contains("collides with mod id"));
     }
 
-    private static MyoModDto activeMod(Class<? extends Annotation> annotationClass, String modId) {
-        return new MyoModDto(
-                annotationClass,
-                new MyoModInfo(modId, modId, modId, new DefaultArtifactVersion("1.0.0")),
-                "*",
-                IntegrationMode.DEFAULT);
-    }
-
     private static ScannedAnnotation myoModAnnotation(Class<? extends Annotation> annotationClass,
             ElementType targetType) {
         return new ScannedAnnotation(Type.getType(MyoMod.class), targetType, Type.getType(annotationClass));
@@ -546,24 +647,9 @@ class ModIntegrationManagerTest {
         return new MyoModInfo(modId, namespace, displayName, new DefaultArtifactVersion(version));
     }
 
-    @SuppressWarnings("unchecked")
-    private static void activate(MyoModDto mod) throws ReflectiveOperationException {
-        Map<MyoModDto, Class<? extends Annotation>> activeIntegrations =
-                (Map<MyoModDto, Class<? extends Annotation>>) field("activeIntegrations").get(null);
-        activeIntegrations.put(mod, mod.getAnnotationClass());
-    }
-
-    private static void clearManager() throws ReflectiveOperationException {
+    private static void clearManager() {
         AnnotationScanner.setAnnotationProvider(Stream::empty);
-        ((Map<?, ?>) field("registeredIntegrations").get(null)).clear();
-        ((Map<?, ?>) field("activeIntegrations").get(null)).clear();
         ModIntegrationManager.setModList(IModList.EMPTY);
-    }
-
-    private static Field field(String name) throws ReflectiveOperationException {
-        Field field = ModIntegrationManager.class.getDeclaredField(name);
-        field.setAccessible(true);
-        return field;
     }
 
     @Target({ElementType.TYPE, ElementType.ANNOTATION_TYPE})
@@ -599,6 +685,18 @@ class ModIntegrationManagerTest {
     @Retention(RetentionPolicy.RUNTIME)
     @MyoMod(value = "range", versionRange = "[2.0.0,)")
     private @interface RangeIntegration {
+    }
+
+    @Target({ElementType.TYPE, ElementType.ANNOTATION_TYPE})
+    @Retention(RetentionPolicy.RUNTIME)
+    @MyoMod(value = "conflicting_ranges", versionRange = "[1.0.0,2.0.0)")
+    private @interface FirstConflictingRangeIntegration {
+    }
+
+    @Target({ElementType.TYPE, ElementType.ANNOTATION_TYPE})
+    @Retention(RetentionPolicy.RUNTIME)
+    @MyoMod(value = "conflicting_ranges", versionRange = "[2.0.0,3.0.0)")
+    private @interface SecondConflictingRangeIntegration {
     }
 
     @Target({ElementType.TYPE, ElementType.ANNOTATION_TYPE})

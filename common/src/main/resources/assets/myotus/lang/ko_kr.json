@@ -2,7 +2,7 @@
   "itemGroup.myotus": "Myotus",
   "gui.myotus.button.bug_report.tooltip": "이 설정 터미널 버그를 모드 제작자에게 제보합니다.",
   "gui.myotus.button.ae2setting": "AE2 터미널 설정",
-  "error.myotus.mod.loading.version.mismatch": "%s는 %s 이상 버전이어야 합니다. 현재 버전: %s",
+  "error.myotus.mod.loading.version.mismatch": "%s 버전은 %s 범위를 충족해야 합니다. 현재 버전: %s",
   "gui.myotus.config.title": "Myotus 설정",
   "gui.myotus.checkbox.tab.sorting": "탭을 활성 상태 기준으로 정렬",
   "gui.myotus.checkbox.show_upgrade_panel_button": "업그레이드 패널 버튼 표시",

@@ -36,12 +36,12 @@ public final class AnnotationScanner {
     private AnnotationScanner() {
     }
 
-    public static void setAnnotationProvider(Supplier<Stream<ScannedAnnotation>> provider) {
+    public static synchronized void setAnnotationProvider(Supplier<Stream<ScannedAnnotation>> provider) {
         annotationProvider = Objects.requireNonNull(provider, "provider");
         clearCache();
     }
 
-    public static Set<ScannedAnnotation> getAnnotations() {
+    public static synchronized Set<ScannedAnnotation> getAnnotations() {
         Set<ScannedAnnotation> annotations = cachedAnnotations;
         if (annotations == null) {
             annotations = immutableSet(annotationProvider.get());
@@ -50,7 +50,7 @@ public final class AnnotationScanner {
         return annotations;
     }
 
-    public static Set<ScannedAnnotation> getMyoModAnnotations() {
+    public static synchronized Set<ScannedAnnotation> getMyoModAnnotations() {
         Set<ScannedAnnotation> annotations = myoModAnnotations;
         if (annotations == null) {
             annotations = immutableSet(getAnnotations().stream()
@@ -64,7 +64,7 @@ public final class AnnotationScanner {
         return annotations;
     }
 
-    public static Set<ScannedAnnotation> getMyoModActiveAnnotations() {
+    public static synchronized Set<ScannedAnnotation> getMyoModActiveAnnotations() {
         Set<ScannedAnnotation> annotations = myoModActiveAnnotations;
         if (annotations == null) {
             annotations = immutableSet(getMyoModAnnotations().stream()
@@ -77,7 +77,7 @@ public final class AnnotationScanner {
         return annotations;
     }
 
-    public static Set<ScannedAnnotation> getActiveIntegrationAnnotations() {
+    public static synchronized Set<ScannedAnnotation> getActiveIntegrationAnnotations() {
         Set<ScannedAnnotation> annotations = activeIntegrationAnnotations;
         if (annotations == null) {
             annotations = immutableSet(getAnnotations().stream()
@@ -93,7 +93,7 @@ public final class AnnotationScanner {
         return getActiveIntegrationAnnotations();
     }
 
-    public static Set<ScannedAnnotation> getItemListAnnotations() {
+    public static synchronized Set<ScannedAnnotation> getItemListAnnotations() {
         Set<ScannedAnnotation> annotations = itemListAnnotations;
         if (annotations == null) {
             annotations = immutableSet(getAnnotations().stream()
@@ -122,11 +122,19 @@ public final class AnnotationScanner {
                 .filter(AnnotationScanner::isTargetActive));
     }
 
-    static void clearCache() {
+    static synchronized void clearCache() {
         cachedAnnotations = null;
         myoModAnnotations = null;
         myoModActiveAnnotations = null;
         itemListAnnotations = null;
+        activeIntegrationAnnotations = null;
+    }
+
+    /**
+     * Clears only scan results whose contents depend on the currently active mod integrations.
+     */
+    public static synchronized void invalidateIntegrationCaches() {
+        myoModActiveAnnotations = null;
         activeIntegrationAnnotations = null;
     }
 

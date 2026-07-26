@@ -142,6 +142,27 @@ class AnnotationScannerTest {
         assertEquals(List.of(activeTarget), List.copyOf(AnnotationScanner.findActive(FirstAnnotation.class)));
     }
 
+    @Test
+    void integrationDependentCachesRefreshWhenTheLoadedModSetChanges() {
+        var loadedMyoMod = myoModAnnotation(LoadedIntegration.class);
+        var missingMyoMod = myoModAnnotation(MissingIntegration.class);
+        var loadedTarget = scanned(LoadedIntegration.class, ActiveTarget.class);
+        var missingTarget = scanned(MissingIntegration.class, PartiallyActiveTarget.class);
+        AnnotationScanner.setAnnotationProvider(() -> Stream.of(
+                loadedMyoMod,
+                missingMyoMod,
+                loadedTarget,
+                missingTarget));
+
+        ModIntegrationManager.setModList(modList("loaded"));
+        assertEquals(List.of(loadedMyoMod), List.copyOf(AnnotationScanner.getMyoModActiveAnnotations()));
+        assertEquals(List.of(loadedTarget), List.copyOf(AnnotationScanner.getActiveIntegrationAnnotations()));
+
+        ModIntegrationManager.setModList(modList("missing"));
+        assertEquals(List.of(missingMyoMod), List.copyOf(AnnotationScanner.getMyoModActiveAnnotations()));
+        assertEquals(List.of(missingTarget), List.copyOf(AnnotationScanner.getActiveIntegrationAnnotations()));
+    }
+
     private static ScannedAnnotation myoModAnnotation(Class<?> annotationClass) {
         return new ScannedAnnotation(Type.getType(MyoMod.class), ElementType.ANNOTATION_TYPE, Type.getType(annotationClass));
     }

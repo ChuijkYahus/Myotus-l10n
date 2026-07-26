@@ -13,15 +13,15 @@ public final class MyoModVersionMismatchException extends RuntimeException {
     private final String versionRange;
 
     public MyoModVersionMismatchException(MyoModInfo modInfo, String versionRange) {
-        super("MyoMod version mismatch for %s: required %s, found %s".formatted(
+        super("MyoMod version mismatch for %s: required range %s, found %s".formatted(
                 Objects.requireNonNull(modInfo, "modInfo").displayName(),
-                ModVersionHelper.getMinimumVersion(versionRange),
+                normalizeVersionRange(versionRange),
                 modInfo.version()));
         this.modId = modInfo.modId();
         this.displayModName = modInfo.displayName();
         this.minimumVersion = ModVersionHelper.getMinimumVersion(versionRange);
         this.modVersion = modInfo.version();
-        this.versionRange = versionRange == null || versionRange.isBlank() ? "*" : versionRange;
+        this.versionRange = normalizeVersionRange(versionRange);
     }
 
     public String getModId() {
@@ -42,5 +42,9 @@ public final class MyoModVersionMismatchException extends RuntimeException {
 
     public String getVersionRange() {
         return versionRange;
+    }
+
+    private static String normalizeVersionRange(String versionRange) {
+        return versionRange == null || versionRange.isBlank() ? "*" : versionRange.trim();
     }
 }

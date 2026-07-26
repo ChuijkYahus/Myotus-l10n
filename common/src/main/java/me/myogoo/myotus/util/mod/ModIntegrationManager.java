@@ -24,31 +24,35 @@ import java.util.Objects;
 import java.util.Set;
 
 public final class ModIntegrationManager {
-    private static final Map<Class<? extends Annotation>, MyoModRegistration> registeredIntegrations =
-            new LinkedHashMap<>();
-    private static final Map<MyoModDto, Class<? extends Annotation>> activeIntegrations = new LinkedHashMap<>();
-    private static IModList modList = IModList.EMPTY;
+    private static volatile State state = State.empty();
 
     private ModIntegrationManager() {
     }
 
     public static void setModList(IModList modList) {
-        ModIntegrationManager.modList = Objects.requireNonNull(modList, "modList");
-        registeredIntegrations.clear();
-        activeIntegrations.clear();
-        registerMyoModAnnotations();
-        rebuildActiveIntegrations();
+        IModList nextModList = Objects.requireNonNull(modList, "modList");
+        try {
+            Map<Class<? extends Annotation>, MyoModRegistration> registeredIntegrations =
+                    registerMyoModAnnotations();
+            Map<MyoModDto, Class<? extends Annotation>> activeIntegrations =
+                    rebuildActiveIntegrations(nextModList, registeredIntegrations);
+            state = new State(nextModList, registeredIntegrations, activeIntegrations);
+        } finally {
+            AnnotationScanner.invalidateIntegrationCaches();
+        }
     }
 
     public static MyoModDto get(String id) {
-        return activeIntegrations.keySet().stream()
+        State snapshot = state;
+        return snapshot.activeIntegrations().keySet().stream()
                 .filter(mod -> matches(mod, id))
                 .findFirst()
                 .orElse(null);
     }
 
     public static Class<? extends Annotation> getClass(MyoModDto mod) {
-        return activeIntegrations.entrySet().stream()
+        State snapshot = state;
+        return snapshot.activeIntegrations().entrySet().stream()
                 .filter(entry -> entry.getKey().isSameRegistration(mod))
                 .map(Map.Entry::getValue)
                 .findFirst()
@@ -56,44 +60,49 @@ public final class ModIntegrationManager {
     }
 
     public static boolean isLoaded(Class<? extends Annotation> annotationClass) {
-        return activeIntegrations.values().stream()
-                .anyMatch(active -> AnnotationTypes.matches(annotationClass, active)
-                        || AnnotationTypes.matches(active, annotationClass));
+        State snapshot = state;
+        return isLoaded(snapshot, annotationClass);
     }
 
     public static boolean isLoaded(MyoModDto mod) {
-        return activeIntegrations.keySet().stream()
+        State snapshot = state;
+        return snapshot.activeIntegrations().keySet().stream()
                 .anyMatch(active -> active.isSameRegistration(mod));
     }
 
     public static boolean isLoaded(Type annotationType) {
+        State snapshot = state;
         Class<?> annotationClass = SafeClass.forType(annotationType);
         if (annotationClass == null || !annotationClass.isAnnotation()) {
             return false;
         }
         @SuppressWarnings("unchecked")
         Class<? extends Annotation> typedAnnotationClass = (Class<? extends Annotation>) annotationClass;
-        return isLoaded(typedAnnotationClass);
+        return isLoaded(snapshot, typedAnnotationClass);
     }
 
     public static boolean isLoaded(String id) {
-        return activeIntegrations.keySet().stream()
+        State snapshot = state;
+        return snapshot.activeIntegrations().keySet().stream()
                 .anyMatch(mod -> matches(mod, id));
     }
 
     public static boolean isRegistered(String id) {
-        return registeredIntegrations.values().stream()
+        State snapshot = state;
+        return snapshot.registeredIntegrations().values().stream()
                 .anyMatch(mod -> mod.matches(id));
     }
 
     public static boolean isRegistered(Class<? extends Annotation> annotationClass) {
-        return registeredIntegrations.keySet().stream()
+        State snapshot = state;
+        return snapshot.registeredIntegrations().keySet().stream()
                 .anyMatch(registered -> AnnotationTypes.matches(annotationClass, registered)
                         || AnnotationTypes.matches(registered, annotationClass));
     }
 
     public static Class<? extends Annotation> getClass(String id) {
-        var active = activeIntegrations.entrySet().stream()
+        State snapshot = state;
+        var active = snapshot.activeIntegrations().entrySet().stream()
                 .filter(entry -> matches(entry.getKey(), id))
                 .map(Map.Entry::getValue)
                 .distinct()
@@ -105,7 +114,7 @@ public final class ModIntegrationManager {
             return null;
         }
 
-        var registered = registeredIntegrations.values().stream()
+        var registered = snapshot.registeredIntegrations().values().stream()
                 .filter(mod -> mod.matches(id))
                 .map(MyoModRegistration::annotationClass)
                 .distinct()
@@ -114,22 +123,31 @@ public final class ModIntegrationManager {
     }
 
     public static Map<MyoModDto, Class<? extends Annotation>> getActiveIntegrations() {
-        return Collections.unmodifiableMap(activeIntegrations);
+        State snapshot = state;
+        return snapshot.activeIntegrations();
     }
 
     public static List<RegisteredIntegration> getRegisteredIntegrations() {
-        return registeredIntegrations.values().stream()
+        State snapshot = state;
+        return snapshot.registeredIntegrations().values().stream()
                 .map(registration -> new RegisteredIntegration(
                         registration.modId(),
                         registration.annotationClass(),
                         registration.aliases(),
                         registration.versionRange(),
                         registration.mode(),
-                        isLoaded(registration.annotationClass())))
+                        isLoaded(snapshot, registration.annotationClass())))
                 .toList();
     }
 
-    private static void registerMyoModAnnotations() {
+    private static boolean isLoaded(State snapshot, Class<? extends Annotation> annotationClass) {
+        return snapshot.activeIntegrations().values().stream()
+                .anyMatch(active -> AnnotationTypes.matches(annotationClass, active)
+                        || AnnotationTypes.matches(active, annotationClass));
+    }
+
+    private static Map<Class<? extends Annotation>, MyoModRegistration> registerMyoModAnnotations() {
+        Map<Class<? extends Annotation>, MyoModRegistration> registeredIntegrations = new LinkedHashMap<>();
         for (AnnotationScanner.ScannedAnnotation annotation : AnnotationScanner.getMyoModAnnotations()) {
             Class<?> annotationClass = SafeClass.forType(annotation.clazz());
             if (annotationClass == null || !annotationClass.isAnnotation()) {
@@ -149,17 +167,20 @@ public final class ModIntegrationManager {
             registeredIntegrations.put(typedAnnotationClass,
                     MyoModRegistration.fromAnnotation(typedAnnotationClass, myoMod));
         }
-        validateAliases();
+        validateAliases(registeredIntegrations);
+        return registeredIntegrations;
     }
 
-    private static void rebuildActiveIntegrations() {
-        activeIntegrations.clear();
-
-        Map<String, Set<String>> aliasesByModId = aliasesByModId();
-        Map<String, String> versionRangesByModId = versionRangesByModId();
+    private static Map<MyoModDto, Class<? extends Annotation>> rebuildActiveIntegrations(
+            IModList modList,
+            Map<Class<? extends Annotation>, MyoModRegistration> registeredIntegrations) {
+        Map<MyoModDto, Class<? extends Annotation>> activeIntegrations = new LinkedHashMap<>();
+        Map<String, Set<String>> aliasesByModId = aliasesByModId(registeredIntegrations);
+        Map<String, String> versionRangesByModId = versionRangesByModId(modList, registeredIntegrations);
         Map<String, List<MyoModDto>> activeByGroup = new LinkedHashMap<>();
         for (MyoModRegistration registration : registeredIntegrations.values()) {
             MyoModDto mod = finalizeRegistration(
+                    modList,
                     registration,
                     aliasesForActiveRegistration(registration, aliasesByModId),
                     versionRangeForActiveRegistration(registration, versionRangesByModId));
@@ -173,12 +194,13 @@ public final class ModIntegrationManager {
                     .filter(mod -> mod.getMode() == IntegrationMode.OVERRIDE)
                     .toList();
             if (!overrides.isEmpty()) {
-                overrides.forEach(ModIntegrationManager::activate);
+                overrides.forEach(mod -> activate(activeIntegrations, mod));
                 continue;
             }
 
-            mods.forEach(ModIntegrationManager::activate);
+            mods.forEach(mod -> activate(activeIntegrations, mod));
         }
+        return activeIntegrations;
     }
 
     private static String activationGroupKey(MyoModRegistration registration) {
@@ -188,12 +210,12 @@ public final class ModIntegrationManager {
         return registration.modId();
     }
 
-    private static void activate(MyoModDto mod) {
+    private static void activate(Map<MyoModDto, Class<? extends Annotation>> activeIntegrations, MyoModDto mod) {
         activeIntegrations.put(mod, mod.getAnnotationClass());
     }
 
-    private static MyoModDto finalizeRegistration(MyoModRegistration registration, Set<String> sharedAliases,
-            String sharedVersionRange) {
+    private static MyoModDto finalizeRegistration(IModList modList, MyoModRegistration registration,
+            Set<String> sharedAliases, String sharedVersionRange) {
         if (!modList.isLoaded(registration.modId())) {
             return null;
         }
@@ -229,7 +251,8 @@ public final class ModIntegrationManager {
         return versionRangesByModId.getOrDefault(registration.modId(), registration.versionRange());
     }
 
-    private static Map<String, Set<String>> aliasesByModId() {
+    private static Map<String, Set<String>> aliasesByModId(
+            Map<Class<? extends Annotation>, MyoModRegistration> registeredIntegrations) {
         Map<String, Set<String>> aliasesByModId = new LinkedHashMap<>();
         for (MyoModRegistration registration : registeredIntegrations.values()) {
             if (registration.hasCustomCondition()) {
@@ -241,10 +264,12 @@ public final class ModIntegrationManager {
         return aliasesByModId;
     }
 
-    private static Map<String, String> versionRangesByModId() {
+    private static Map<String, String> versionRangesByModId(
+            IModList modList,
+            Map<Class<? extends Annotation>, MyoModRegistration> registeredIntegrations) {
         Map<String, List<String>> rangesByModId = new LinkedHashMap<>();
         for (MyoModRegistration registration : registeredIntegrations.values()) {
-            if (registration.hasCustomCondition()) {
+            if (registration.hasCustomCondition() || !modList.isLoaded(registration.modId())) {
                 continue;
             }
             rangesByModId.computeIfAbsent(registration.modId(), ignored -> new ArrayList<>())
@@ -253,12 +278,20 @@ public final class ModIntegrationManager {
 
         Map<String, String> mergedRangesByModId = new LinkedHashMap<>();
         for (Map.Entry<String, List<String>> entry : rangesByModId.entrySet()) {
-            mergedRangesByModId.put(entry.getKey(), ModVersionHelper.intersectVersionRanges(entry.getValue()));
+            try {
+                mergedRangesByModId.put(entry.getKey(), ModVersionHelper.intersectVersionRanges(entry.getValue()));
+            } catch (IllegalArgumentException e) {
+                throw new IllegalStateException(
+                        "MyoMod integrations for '%s' declare incompatible version ranges: %s"
+                                .formatted(entry.getKey(), entry.getValue()),
+                        e);
+            }
         }
         return mergedRangesByModId;
     }
 
-    private static void validateAliases() {
+    private static void validateAliases(
+            Map<Class<? extends Annotation>, MyoModRegistration> registeredIntegrations) {
         Map<String, String> aliasOwners = new HashMap<>();
         Map<String, Class<? extends Annotation>> aliasOwnerClasses = new HashMap<>();
         for (MyoModRegistration registration : registeredIntegrations.values()) {
@@ -316,6 +349,24 @@ public final class ModIntegrationManager {
 
     private static boolean matches(MyoModDto mod, String id) {
         return mod.matches(id);
+    }
+
+    private record State(
+            IModList modList,
+            Map<Class<? extends Annotation>, MyoModRegistration> registeredIntegrations,
+            Map<MyoModDto, Class<? extends Annotation>> activeIntegrations) {
+
+        private State {
+            modList = Objects.requireNonNull(modList, "modList");
+            registeredIntegrations = Collections.unmodifiableMap(new LinkedHashMap<>(
+                    Objects.requireNonNull(registeredIntegrations, "registeredIntegrations")));
+            activeIntegrations = Collections.unmodifiableMap(new LinkedHashMap<>(
+                    Objects.requireNonNull(activeIntegrations, "activeIntegrations")));
+        }
+
+        private static State empty() {
+            return new State(IModList.EMPTY, Map.of(), Map.of());
+        }
     }
 
     public record RegisteredIntegration(
