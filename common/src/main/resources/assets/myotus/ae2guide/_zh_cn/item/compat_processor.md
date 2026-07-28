@@ -14,11 +14,9 @@ item_ids:
 
 # 兼容处理器
 
-（本页由 AI 翻译。如说明有误或不够自然，欢迎提交 PR 改进。）
-
 <ItemImage id="compat_processor" scale={3}/>
 
-<ItemLink id="compat_processor" /> 是供使用 Myotus 的附属模组作为基础材料使用的处理器。
+<ItemLink id="compat_processor" />是以Myotus为前置的附属所用的基础处理器。
 
 ## 相关物品
 

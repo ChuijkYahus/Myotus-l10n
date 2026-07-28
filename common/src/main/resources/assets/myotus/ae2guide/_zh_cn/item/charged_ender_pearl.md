@@ -14,11 +14,9 @@ item_ids:
 
 # 充能末影珍珠
 
-（本页由 AI 翻译。如说明有误或不够自然，欢迎提交 PR 改进。）
-
 <ItemImage id="charged_ender_pearl" scale={4}/>
 
-<ItemLink id="charged_ender_pearl"/> 是一个以末影珍珠为基础的 Myotus 物品，飞行距离比普通末影珍珠远 1.5 倍。
+<ItemLink id="charged_ender_pearl"/>是由末影珍珠加工而来的Myotus物品。它的飞行距离是普通末影珍珠的1.5倍。
 
 ## 相关物品
 
