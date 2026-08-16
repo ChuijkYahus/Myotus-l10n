@@ -15,13 +15,24 @@ public final class AdvancedAERecipes extends JsonRecipeProvider {
 
     @Override
     protected void buildRecipes(JsonRecipeOutput output) {
-        reaction("advanced_ae/reaction_chamer/aae_charged_ender_pearl", "c:ender_pearls", 64, 1_300_000, 1_000,
-                MyoItems.CHARGED_ENDER_PEARL.get())
+        MyoAdvancedAEReactionRecipeBuilder
+                .create(id("advanced_ae/reaction_chamer/aae_charged_ender_pearl"))
+                .conditions(conditions("advanced_ae"))
+                .energy(400_000)
+                .fluid("minecraft:water", 250)
+                .inputTag("c:ender_pearls", 16)
+                .output(MyoItems.CHARGED_ENDER_PEARL.get(), 16)
                 .save(output);
 
-        reaction("advanced_ae/reaction_chamer/aae_charged_ender_pearl_block", "c:storage_blocks/ender_pearl", 64, 13_000_000,
-                10_000, MyoItems.CHARGED_ENDER_PEARL_BLOCK.get())
+        MyoAdvancedAEReactionRecipeBuilder
+                .create(id("advanced_ae/reaction_chamer/aae_charged_ender_pearl_block"))
+                .conditions(conditions("advanced_ae"))
+                .energy(13_000_000)
+                .fluid("minecraft:water", 10_000)
+                .inputTag("c:storage_blocks/ender_pearl", 64)
+                .output(MyoItems.CHARGED_ENDER_PEARL_BLOCK.get(), 64)
                 .save(output);
+        
     }
 
     @Override
@@ -30,7 +41,7 @@ public final class AdvancedAERecipes extends JsonRecipeProvider {
     }
 
     private static MyoAdvancedAEReactionRecipeBuilder reaction(String path, String inputTag, int inputAmount,
-                                                                int energy, int waterAmount, ItemLike outputItem) {
+                                                               int energy, int waterAmount, ItemLike outputItem) {
         return MyoAdvancedAEReactionRecipeBuilder
                 .create(id(path))
                 .conditions(conditions("advanced_ae"))
