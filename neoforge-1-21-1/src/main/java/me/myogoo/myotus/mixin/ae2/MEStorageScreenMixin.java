@@ -73,7 +73,6 @@ public class MEStorageScreenMixin extends AEBaseScreen<AEBaseMenu> {
                 myotus$floatingSubScreen.populateScreen(this::addRenderableWidget, screenBounds, this);
 
                 this.widgets.add(TerminalUpgradePanel.WIDGET_ID, myotus$floatingSubScreen);
-                this.addRenderableWidget(myotus$toggleButton);
             }
         }
     }
